@@ -15,7 +15,7 @@
   * setting desired count of maximum consecutive measurements failed triggering the alarm
   * setting desired utilization target that defines idle/underutilized state
   * setting desired email address that notifications will be delivered to (email distribution list is recommended here)
-* desired email address subscription needs to be confirmed by acknowledgeing the registration email that is sent after successful deployment 
+* desired email address subscription needs to be confirmed by acknowledgeing the registration email that is sent after successful deployment
 * every new EC2 instance that changes the state stopped->running will then trigger CloudWatch alarm, that then sends a notification into SNS topic, sending an email to specified recipient
 
 
@@ -31,7 +31,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ## Credit:
 Inspired by: https://medium.com/@Hironsan/save-aws-ec2-cost-by-automatically-stopping-idle-instance-using-lambda-and-cloudwatch-759edd62b27d
 
-## Architecture: 
+## Architecture:
 
-TBD
-
+![alt text](src/architecture.png "dEC2line Serverless Architecture Diagram")
