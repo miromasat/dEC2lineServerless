@@ -1,0 +1,157 @@
+---
+AWSTemplateFormatVersion : 2010-09-09
+Description: serverless architecture to alert on idle/underutilized EC2 resources in AWS account environment
+Parameters:
+  ALARMINSTANCE:
+    Type: String
+    Default: c5d
+    Description: Enter instance family you wish to monitor. Default is c5d.
+  ALARMTRESHOLD:
+    Type: Number
+    Default: 20
+    Description: Percentage of alarm being triggered. Default is 20.
+  ALARMEVALUATIONPERIODS:
+    Type: Number
+    Default: 2
+    Description: Number of periods failed, triggering the alarm. Default is after 2 periods.
+  SNSEMAIL:
+    Type: String
+    Default: email@example.com
+    Description: Email, alert n Notifications will be sent to.
+Outputs:
+  AlertLambdaID:
+    Description: Alert Lambda Name
+    Value:
+      Ref: AlertLambda
+  EventID:
+    Description: Event Name
+    Value:
+      Ref: EventEC2
+  NotificationID:
+    Description: Notification Name
+    Value:
+      Ref: NotificationSNS
+Resources:
+    NotificationSNS:
+      Type: AWS::SNS::Topic
+      Properties:
+        DisplayName:
+          Fn::Sub: "NotificationSNS-${AWS::StackName}"
+        Subscription:
+          - Endpoint:
+              Ref: SNSEMAIL
+            Protocol: "email"
+        TopicName:
+          Fn::Sub: "NotificationSNS-${AWS::StackName}"
+    LambdaExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - lambda.amazonaws.com
+            Action:
+            - sts:AssumeRole
+        Path: "/"
+        Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - "*"
+              Resource:
+              - "*"
+    AlertLambda:
+      Type: "AWS::Lambda::Function"
+      Properties:
+        Code:
+          ZipFile: >
+            import boto3, os
+
+            def put_cpu_alarm(instance_id):
+                cloudWatch   = boto3.client('cloudwatch')
+                cloudWatch.put_metric_alarm(
+                    AlarmName          = 'CPU_ALARM_'+instance_id,
+                    AlarmDescription   = 'Alarm when CPU of '+os.environ['ALARM_INSTANCE']+' does not exceed '+os.environ['ALARM_TRESHOLD']+'%',
+                    AlarmActions       = [os.environ['SNS_ARN']],
+                    MetricName         = 'CPUUtilization',
+                    Namespace          = 'AWS/EC2' ,
+                    Statistic          = 'Average',
+                    Dimensions         = [{'Name': 'InstanceId', 'Value': instance_id}],
+                    Period             = 300,
+                    EvaluationPeriods  = int(os.environ['ALARM_EVALUATION_PERIODS']),
+                    Threshold          = int(os.environ['ALARM_TRESHOLD']),
+                    ComparisonOperator = 'LessThanOrEqualToThreshold',
+                    TreatMissingData   = 'notBreaching'
+                )
+
+
+            def lambda_handler(event, context):
+                instance_id = event['detail']['instance-id']
+                ec2 = boto3.resource('ec2')
+                instance = ec2.Instance(instance_id)
+                if instance.instance_type.startswith(os.environ['ALARM_INSTANCE']):
+                    put_cpu_alarm(instance_id)
+
+
+        Description: Low Utilization alerting Lambda Function
+        FunctionName:
+          Fn::Sub: "AlertEC2-${AWS::StackName}"
+        Handler: index.lambda_handler
+        Role:
+          Fn::GetAtt:
+            - "LambdaExecutionRole"
+            - "Arn"
+        Runtime: "python2.7"
+        Timeout: 25
+        Environment:
+                Variables:
+                    SNS_ARN:
+                      Ref: NotificationSNS
+                    ALARM_INSTANCE:
+                      Ref: ALARMINSTANCE
+                    ALARM_TRESHOLD:
+                      Ref: ALARMTRESHOLD
+                    ALARM_EVALUATION_PERIODS:
+                      Ref: ALARMEVALUATIONPERIODS
+                    SNS_EMAIL:
+                      Ref: SNSEMAIL
+
+    EventEC2:
+      Type: AWS::Events::Rule
+      Properties:
+        Name:
+            Fn::Sub: "EventEC2-${AWS::StackName}"
+        Description: "Event to trigger Lambda based in instance starting to run"
+        EventPattern:
+          source:
+            - "aws.ec2"
+          detail-type:
+            - "EC2 Instance State-change Notification"
+          detail:
+            state:
+              - "running"
+        State: "ENABLED"
+        Targets:
+          -
+            Arn:
+              Fn::GetAtt:
+                - "AlertLambda"
+                - "Arn"
+            Id: "AlertLambda"
+    PermissionForEventsToInvokeLambda:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName:
+          Ref: "AlertLambda"
+        Action: "lambda:InvokeFunction"
+        Principal: "events.amazonaws.com"
+        SourceArn:
+          Fn::GetAtt:
+            - "EventEC2"
+            - "Arn"
